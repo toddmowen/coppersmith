@@ -39,8 +39,7 @@ object build extends Build {
       scalacOptions += "-Xfatal-warnings",
       scalacOptions in (Compile, console) ~= (_.filterNot(Set("-Xfatal-warnings", "-Ywarn-unused-import"))),
       scalacOptions in (Compile, doc) ~= (_ filterNot (_ == "-Xfatal-warnings")),
-      scalacOptions in (Test, console) := (scalacOptions in (Compile, console)).value,
-      dependencyOverrides += "com.chuusai" %% "shapeless" % "2.2.5" //until maestro is updated
+      scalacOptions in (Test, console) := (scalacOptions in (Compile, console)).value
     )
 
   lazy val all = Project(
@@ -182,18 +181,18 @@ object build extends Build {
       Defaults.coreDefaultSettings
         ++ uniformDependencySettings
         ++ uniform.project("coppersmith-tools", "commbank.coppersmith.tools")
-        ++ Seq(libraryDependencies ++= Seq(
+        ++ Seq(
+            libraryDependencies ++= Seq(
              "io.github.lukehutch" % "fast-classpath-scanner" % "1.9.7",
              "org.specs2"         %% "specs2-matcher-extra"   % versions.specs % "test"
-           )
-        )
-        ++ Seq(
+           ) ++ depend.testing(configuration = "test"),
           fork in Test := true,
+          resources in Test += file("tools/METADATA_JSON.markdown"),
           javaOptions in Test += {
             val files: Seq[File] = (fullClasspath in Compile).value.files
             val sbtClasspath: String = files.map(x => x.getAbsolutePath).mkString(":")
             s"-Dsbt-classpath=$sbtClasspath"
           }
         )
-  ).dependsOn(core)
+  ).dependsOn(core % "compile->compile;test->test")
 }

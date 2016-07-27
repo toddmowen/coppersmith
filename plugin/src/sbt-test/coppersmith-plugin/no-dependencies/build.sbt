@@ -19,14 +19,3 @@ scalaVersion := "2.11.8"
 resolvers ++= Seq(
   "commbank-releases" at "http://commbank.artifactoryonline.com/commbank/ext-releases-local",
   "cloudera" at "https://repository.cloudera.com/artifactory/cloudera-repos/")
-
-  {
-    val pluginVersion = System.getProperty("plugin.version")
-    if(pluginVersion == null)
-      throw new RuntimeException("""|The system property 'plugin.version' is not defined.
-                                    |Specify this property using the scriptedLaunchOpts -D.""".stripMargin)
-    else libraryDependencies ++= Seq("au.com.cba.omnia" %% "coppersmith-core"     % pluginVersion,
-                                     "au.com.cba.omnia" %% "coppersmith-scalding" % pluginVersion,
-                                     "au.com.cba.omnia" %% "coppersmith-tools"    % pluginVersion
-    )
-  }

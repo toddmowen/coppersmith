@@ -1,6 +1,59 @@
 Change log
 ==========
 
+## 0.21.0
+The coppersmith plugin no longer pulls in coppersmith dependencies, so
+that dependency clashes are easier to manage.
+
+### Upgrading
+  - Add `coppersmith-core`, `coppersmith-scalding` and `coppersmith-tools`
+    dependencies to `build.sbt` (see [user guide](USERGUIDE.markdown) for more details).
+
+## 0.20.0
+Use the version of shapeless specified by uniform, instead of requiring
+shapeless version `2.2.5`. This is potentially a breaking change for users
+who previously found they needed to add a dependency override to their own
+sbt configuration in order to avoid a `ClassNotFoundException` at runtime.
+
+### Upgrading
+  - Remove the following line, if it appears in your sbt configuration
+    (e.g. `build.sbt` or `project/build.scala`):
+
+```
+dependencyOverrides += "com.chuusai" %% "shapeless" % "2.2.5"
+```
+
+## 0.19.0
+Change type used in feature sink codec from `FeatureValue[_]` to
+`FeatureValue[Value]`. In practice this shouldn't affect users of
+coppersmith, except where values are being non-exhaustively matched on
+(which could occur with the introduction of the `Bool` type in
+`0.17.0`, and the `Date` and `Time` types in `0.15.0`).
+
+### Upgrading
+ - If code produces `match may not be exhaustive` warnings at
+   compile-time, add missing cases.
+
+## 0.18.0
+Range metadata arguments added to Feature building classes, allowing ranges
+to be easily specified in Feature Sets.
+
+### Upgrading
+ - Calls to `Patterns.general` and `Patterns.pivot` must include an
+   `Option[Range[V]]` as the last argument
+ - Calls to `SetRange(List[V])` must be changed to `SetRange(V*)`
+ - Change
+   `QueryFeature(featureName, humanDescriptionfilter)`
+   to
+   `QueryFeature(featureName, humanDescription)(filter)`
+   and
+   `basicFeature[V <: Value : TypeTag](featureName, humanDescription, featureType, value)`
+   to
+   `basicFeature[V <: Value : TypeTag](featureName, humanDescription, featureType)(value)`
+
+## 0.17.0
+First-class support for features with boolean outputs via the new `Feature.Value.Bool` type.
+
 ## 0.16.0
 Shapeless multi-way join support replaced with generated code solution
 for more consistency in defining and binding feature sources. Also

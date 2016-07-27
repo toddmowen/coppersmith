@@ -16,13 +16,12 @@ package commbank.coppersmith
 
 import commbank.coppersmith.util.{Timestamp, Datestamp}
 import org.joda.time.DateTime
-import org.scalacheck._, Arbitrary.arbitrary, Prop.forAll
+import org.scalacheck._, Prop.forAll
 
 import org.specs2._
 import org.specs2.execute._, Typecheck._
 import org.specs2.matcher.TypecheckMatchers._
 
-import scala.util.Try
 import scalaz.{Name => _, Value =>_, _}, Scalaz._
 import scalaz.scalacheck.ScalazArbitrary.NonEmptyListArbitrary
 
@@ -52,6 +51,8 @@ object MetadataSpec extends Specification with ScalaCheck { def is = s2"""
         Metadata[Customer, FloatingPoint](namespace, name, desc, fType).valueType must_== FloatingPointType
       case Str(_) =>
         Metadata[Customer, Str]          (namespace, name, desc, fType).valueType must_== StringType
+      case Bool(_) =>
+        Metadata[Customer, Bool]         (namespace, name, desc, fType).valueType must_== BoolType
       case Date(_) =>
         Metadata[Customer, Date]         (namespace, name, desc, fType).valueType must_== DateType
       case Time(_) =>
@@ -79,32 +80,7 @@ object FeatureValueRangeSpec extends Specification with ScalaCheck { def is = s2
     Widest Str wider than others $widestStr
 """
 
-  // Generates values of the same subtype, but arbitrarily chooses the subtype to generate
-  implicit def arbValues: Arbitrary[NonEmptyList[Value]] =
-    Arbitrary(
-      Gen.oneOf(
-        NonEmptyListArbitrary(Arbitrary(decimalValueGen)).arbitrary,
-        NonEmptyListArbitrary(Arbitrary(floatingPointValueGen)).arbitrary,
-        NonEmptyListArbitrary(Arbitrary(integralValueGen)).arbitrary,
-        NonEmptyListArbitrary(Arbitrary(strValueGen)).arbitrary,
-        NonEmptyListArbitrary(Arbitrary(dateValueGen)).arbitrary,
-        NonEmptyListArbitrary(Arbitrary(timeValueGen)).arbitrary
-      )
-    )
-
   implicit def arbStrs: Arbitrary[NonEmptyList[Str]] = NonEmptyListArbitrary(Arbitrary(strValueGen))
-
-  // Only for use with arbValues above - assumed values to be compared are of the same subtype
-  implicit val valueOrder: Order[Value] =
-    Order.order((a, b) => (a, b) match {
-      case (Decimal(d1), Decimal(d2)) => d1.cmp(d2)
-      case (FloatingPoint(d1), FloatingPoint(d2)) => d1.cmp(d2)
-      case (Integral(i1), Integral(i2)) => i1.cmp(i2)
-      case (Str(s1), Str(s2)) => s1.cmp(s2)
-      case (Date(d1), Date(d2)) => d1.cmp(d2)
-      case (Time(t1), Time(t2)) => t1.cmp(t2)
-      case _ => sys.error("Assumption failed: Expected same value types from arbValues")
-    })
 
   def containsSameMinMax = forAll { (value: Value) =>
     MinMaxRange(value, value).contains(value) must beTrue
@@ -147,13 +123,13 @@ object FeatureValueRangeSpec extends Specification with ScalaCheck { def is = s2
 
   def rangeValueContained = forAll { (idx: Int, vals: NonEmptyList[Value]) =>
     val randIndex = math.abs(idx % vals.size)
-    SetRange(vals.list).contains(vals.list(randIndex)) must beTrue
+    SetRange(vals.list:_*).contains(vals.list(randIndex)) must beTrue
   }
 
   def nonRangeValuesExcluded = forAll { (vals: NonEmptyList[Value]) =>
     val excluded = vals.head
     val range = vals.tail.toSet - excluded
-    SetRange(range.toList).contains(excluded) must beFalse
+    SetRange(range.toList:_*).contains(excluded) must beFalse
   }
 
   def nonStrWidest = forAll { (vals: NonEmptyList[Value]) => !vals.head.isInstanceOf[Str] ==> {
@@ -165,7 +141,7 @@ object FeatureValueRangeSpec extends Specification with ScalaCheck { def is = s2
       case Str(Some(s)) => s.length
       case _ => 0
     }.maximum1
-    SetRange(vals.list).widestValueSize must beSome(widest)
+    SetRange(vals.list:_*).widestValueSize must beSome(widest)
   }}
 }
 
@@ -177,13 +153,14 @@ object FeatureTypeConversionsSpec extends Specification with ScalaCheck {
     Decimal features convert to continuous and to categorical  $decimalConversions
     Floating point features convert to continuous and to categorical  $floatingPointConversions
     String features cannot convert to continuous  $stringConversions
+    Bool features only convert to nominal  $boolConversions
     Date features only convert to instant  $dateConversions
     Time features only convert to instant  $timeConversions
 """
 
   def integralConversions = {
-    val feature = Patterns.general[Customer, Value.Integral, Value.Integral](
-      "ns", "name", "Desc", Type.Nominal, _.id, c => Some(c.age)
+    val feature = Patterns.general[Customer, Value.Integral](
+      "ns", "name", "Desc", Type.Nominal, _.id, c => Some(c.age), None
     )
     Seq(
       feature.metadata.featureType === Type.Nominal,
@@ -194,8 +171,8 @@ object FeatureTypeConversionsSpec extends Specification with ScalaCheck {
   }
 
   def decimalConversions = {
-    val feature = Patterns.general[Customer, Value.Decimal, Value.Decimal](
-      "ns", "name", "Description", Type.Ordinal, _.id, c => Some(BigDecimal(c.age))
+    val feature = Patterns.general[Customer, Value.Decimal](
+      "ns", "name", "Description", Type.Ordinal, _.id, c => Some(BigDecimal(c.age)), None
     )
     Seq(
       feature.metadata.featureType === Type.Ordinal,
@@ -206,8 +183,8 @@ object FeatureTypeConversionsSpec extends Specification with ScalaCheck {
   }
 
   def floatingPointConversions = {
-    val feature = Patterns.general[Customer, Value.FloatingPoint, Value.FloatingPoint](
-      "ns", "name", "Description", Type.Ordinal, _.id, c => Some(c.age.toDouble)
+    val feature = Patterns.general[Customer, Value.FloatingPoint](
+      "ns", "name", "Description", Type.Ordinal, _.id, c => Some(c.age.toDouble), None
     )
     Seq(
       feature.metadata.featureType === Type.Ordinal,
@@ -218,30 +195,46 @@ object FeatureTypeConversionsSpec extends Specification with ScalaCheck {
   }
 
   def stringConversions = {
-    val feature = Patterns.general[Customer, Value.Str, Value.Str](
-      "ns", "name", "Description", Type.Nominal, _.id, c => Some(c.name)
+    val feature = Patterns.general[Customer, Value.Str](
+      "ns", "name", "Description", Type.Nominal, _.id, c => Some(c.name), None
     )
-    feature.metadata.featureType === Type.Nominal
-    typecheck("feature.as(Continuous)") must not succeed
+
+    Seq(
+      feature.metadata.featureType === Type.Nominal,
+      typecheck("feature.as(Continuous)") must not succeed
+    )
+  }
+
+  def boolConversions = {
+    val feature = Patterns.general[Customer, Value.Bool](
+      "ns", "name", "Desc", Type.Nominal, _.id, c => Some(c.age > 20), None
+    )
+
+    Seq(
+      feature.metadata.featureType === Type.Nominal,
+      typecheck("feature.as(Continuous)") must not succeed
+    )
   }
 
   def dateConversions = {
-    val feature = Patterns.general[Customer, Value.Date, Value.Date](
-      "ns", "name", "Description", Type.Instant, _.id, c => Some(Datestamp.unsafeParse(new DateTime(c.time).toString("yyyy-MM-dd")))
+    val feature = Patterns.general[Customer, Value.Date](
+      "ns", "name", "Description", Type.Instant, _.id, c => Some(Datestamp.unsafeParse(new DateTime(c.time).toString("yyyy-MM-dd"))), None
     )
-    feature.metadata.featureType === Type.Instant
+
     Seq(
+      feature.metadata.featureType === Type.Instant,
       typecheck("feature.as(Continuous)") must not succeed,
       typecheck("feature.as(Ordinal)") must not succeed
     )
   }
 
   def timeConversions = {
-    val feature = Patterns.general[Customer, Value.Time, Value.Time](
-      "ns", "name", "Description", Type.Instant, _.id, c => Some(Timestamp(c.time, Some((0,0))))
+    val feature = Patterns.general[Customer, Value.Time](
+      "ns", "name", "Description", Type.Instant, _.id, c => Some(Timestamp(c.time, Some((0,0)))), None
     )
-    feature.metadata.featureType === Type.Instant
+
     Seq(
+      feature.metadata.featureType === Type.Instant,
       typecheck("feature.as(Continuous)") must not succeed,
       typecheck("feature.as(Ordinal)") must not succeed
     )

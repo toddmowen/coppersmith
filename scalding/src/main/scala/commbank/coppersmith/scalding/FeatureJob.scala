@@ -140,7 +140,7 @@ object FeatureSetExecution {
   import SimpleFeatureJob.writeErrorFailure
   private def generateFeatures[S](
     cfg:       Config => FeatureJobConfig[S],
-    transform: (TypedPipe[S], FeatureContext) => TypedPipe[(FeatureValue[_], FeatureTime)]
+    transform: (TypedPipe[S], FeatureContext) => TypedPipe[(FeatureValue[Value], FeatureTime)]
   ): Execution[Set[Path]] = {
     for {
       conf   <- Execution.getConfig.map(cfg)
@@ -154,7 +154,7 @@ object FeatureSetExecution {
 
   private def generateOneToMany[S](
     features: FeatureSetWithTime[S]
-  )(input: TypedPipe[S], ctx: FeatureContext): TypedPipe[(FeatureValue[_], FeatureTime)] = {
+  )(input: TypedPipe[S], ctx: FeatureContext): TypedPipe[(FeatureValue[Value], FeatureTime)] = {
     input.flatMap { s =>
       val time = features.time(s, ctx)
       features.generate(s).map(fv => (fv, time))
@@ -163,7 +163,7 @@ object FeatureSetExecution {
 
   private def generateAggregate[S](
     features: AggregationFeatureSet[S]
-  )(input: TypedPipe[S], ctx: FeatureContext): TypedPipe[(FeatureValue[_], FeatureTime)] = {
+  )(input: TypedPipe[S], ctx: FeatureContext): TypedPipe[(FeatureValue[Value], FeatureTime)] = {
     val grouped: Grouped[EntityId, S] = input.groupBy(s => features.entity(s))
     val (joinedAggregator, unjoiner) = join(features.aggregationFeatures.toList.map(serialisable(_)))
     grouped.aggregate(joinedAggregator).toTypedPipe.flatMap { case (e, v) =>

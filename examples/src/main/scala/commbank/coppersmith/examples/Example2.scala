@@ -28,13 +28,15 @@ import commbank.coppersmith.examples.thrift._
 object Example2 {
   val customerJoinAccount = Join[Customer].to[Account].on(_.acct, _.id)
 
-  val feature = Patterns.general[(Customer, Account), FloatingPoint, FloatingPoint](
+  val feature = Patterns.general[(Customer, Account), FloatingPoint](
     "ns",
     "name",
     "description",
     Continuous,
     {case (c, a) => c._1},
-    {case (c,a)  => Some(a.balance)})
+    {case (c,a)  => Some(a.balance)},
+    None
+  )
 
   case class ExampleConfig(config:Config) {
     val args          = config.getArgs

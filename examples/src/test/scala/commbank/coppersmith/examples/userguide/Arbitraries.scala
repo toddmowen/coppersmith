@@ -19,7 +19,7 @@ import java.text.SimpleDateFormat
 
 import org.scalacheck.{Arbitrary, Gen}, Arbitrary.arbitrary
 
-import commbank.coppersmith.examples.thrift.{Movie, Rating}
+import commbank.coppersmith.examples.thrift.{Movie, Rating, User}
 
 object UserGuideArbitraries {
   // Override the default implicit Arbitrary[String] (brought into scope by Arbitrary.arbString)
@@ -35,10 +35,10 @@ object UserGuideArbitraries {
     for {
       id               <- genMovieId
       title            <- arbitrary[String]
-      releaseDate      <- arbitrary[Date].map(formatDate)
+      releaseDate      <- arbitrary[Option[Date]].map(_.map(formatDate))
       videoReleaseDate <- arbitrary[Option[Date]].map(_.map(formatDate))
       url              <- arbitrary[Option[String]]
-      genres           <- Gen.containerOfN[List, Int](19, Gen.oneOf(0, 1))  // each genre flag is either 0 or 1
+      genres           <- Gen.containerOfN[List, Int](19, Gen.chooseNum(0, 1))  // each genre flag is either 0 or 1
       g                 = genres.iterator  // simple (albeit mutable) access to genre flags,
                                            // less error-prone than explicit indexing by number
     } yield Movie(
@@ -55,5 +55,15 @@ object UserGuideArbitraries {
       rating    <- Gen.oneOf(1, 2, 3, 4, 5)
       timestamp <- arbitrary[Date].map(d => (d.getTime/1000).toString)  // seconds since epoch
     } yield Rating(userId, movieId, rating, timestamp)
+  }
+
+  implicit def arbUser: Arbitrary[User] = Arbitrary {
+    for {
+      id         <- genUserId
+      age        <- arbitrary[Int]
+      gender     <- Gen.oneOf("M", "F")
+      occupation <- arbitrary[String]
+      zipcode    <- arbitrary[String]
+    } yield User(id, age, gender, occupation, zipcode)
   }
 }

@@ -1,3 +1,3 @@
-version in ThisBuild := "0.16.0"
+version in ThisBuild := "0.21.3"
 
 localVersionSettings

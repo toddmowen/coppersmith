@@ -20,7 +20,6 @@ In addition to this document, there is also a
     * [The FeatureSet class](#the-featureset-class)
     * [Execution: the SimpleFeatureJob class](#execution-the-simplefeaturejob-class)
     * [Partition selection](#partition-selection)
-    * [Alternate sinks](#alternate-sinks)
 * [Intermediate](#intermediate)
     * [Shaping input data: the FeatureSource](#shaping-input-data-the-featuresource)
     * [A fluent API: featureBuilder](#a-fluent-api-featurebuilder)
@@ -35,7 +34,9 @@ In addition to this document, there is also a
     * [Multiway joins](#multiway-joins)
     * [Source views](#source-views)
     * [Generating values from job context](#generating-values-from-job-context)
+    * [Alternate sinks](#alternate-sinks)
     * [Generating features from custom scalding code](#generating-features-from-custom-scalding-code)
+    * [Blank features](#blank-features)
     * [Testing](#testing)
 * [Try it yourself](#try-it-yourself)
     * [Setup](#setup)
@@ -53,9 +54,14 @@ Add the coppersmith plugin to your SBT configuration. That is, inside
 
     addSbtPlugin("au.com.cba.omnia" %% "coppersmith-plugin" % "<coppersmith-version>")
 
+, and inside `build.sbt`,
+
+    libraryDependencies ++= Seq("au.com.cba.omnia" %% "coppersmith-core"     % "<coppersmith-version>",
+                                "au.com.cba.omnia" %% "coppersmith-scalding" % "<coppersmith-version>",
+                                "au.com.cba.omnia" %% "coppersmith-tools"    % "<coppersmith-version>")
+
 , where `<coppersmith-version>` is replaced with the version number of
-coppersmith you want to use. The plugin adds the appropriate coppersmith versions
-to your build and enables the publishing of feature metadata.
+coppersmith you want to use. The plugin enables the publishing of feature metadata.
 
 
 ### The `Feature` class
@@ -71,8 +77,18 @@ You can think of it as a function from `S` to `V`:
 A feature must also define some metadata, including:
 - a feature *namespace*,
 - a feature *name*,
-- a feature *description* and
-- a feature *featureType* (`Continuous`, `Discrete`, `Ordinal` or `Nominal`).
+- a feature *description*,
+- a feature *featureType* (`Continuous`, `Discrete`, `Ordinal`, `Nominal` or `Instant`) and optionally
+- a feature *range* (`MinMaxRange`, `SetRange`).
+
+`featureType` | Permitted `Value` types | Examples
+--- | --- | ---
+`Continuous` (Numeric) | `Integral`<br />`Decimal`<br />`FloatingPoint` | Height in *mm* (e.g. `1822`)<br />Gross Domestic Product (`18460646000000.0`)<br />Area of house (`87.2`)
+`Discrete` (Numeric) | `Integral` | Number of visitors to a website (e.g. `35034859`)
+`Ordinal` (Categorical) | `Integral`<br />`Decimal`<br />`FloatingPoint` <br /> `Str`|Customer satisfaction (e.g. `1` to `10`)<br /> <br /> Movie rating (e.g. `1.0`,`4.0`,`4.5` etc.) <br /> Flood risk (e.g. `"Low"`, `"Moderate"`, `"High"`)
+`Nominal` (Categorical) | `Integral`<br />`Str`<br />`Bool` | Product ID (e.g. `22`, `31`, `50`)<br />Nationality (e.g. `"Australia"`, `"India"`, `"UK"`)<br />Joined in last 6 months? (`true` or `false`)
+`Instant` (DateTime) | `Date`<br />`Time` | Date of birth (`"yyyy-MM-dd"`)<br />Transaction time (`"yyyy-MM-dd'T'HH:mm:ss.SSSZZ"`)
+(See [variable descriptions](http://www.abs.gov.au/websitedbs/a3121120.nsf/home/statistical+language+-+what+are+variables) for further information.)
 
 Below is an example of a feature defined by extending the `Feature` class.
 If this looks complicated, don't worry!
@@ -86,27 +102,23 @@ we'll see how this can be made a lot easier.
 
 package commbank.coppersmith.examples.userguide
 
-import commbank.coppersmith.util.Datestamp
 import commbank.coppersmith.api._
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
-object MovieReleaseYear extends Feature[Movie, Integral](
-  Metadata[Movie, Integral](namespace      = "userguide.examples",
-                            name           = "MOVIE_RELEASE_YEAR",
-                            description    = "Calendar year in which the movie was released",
-                            featureType    = Continuous)
+object UserAge extends Feature[User, Integral](
+  Metadata[User, Integral](namespace   = "userguide.examples",
+                           name        = "USER_AGE",
+                           description = "Age of user in years",
+                           featureType = Continuous,
+                           valueRange  = Some(MinMaxRange[Integral](0, 130)))
 ) {
-  val parse = Datestamp.parseFormat("dd-MMM-yyyy")
-
-  def generate(movie: Movie) =
-    parse(movie.releaseDate).right.toOption.map(v =>
-        FeatureValue(entity = movie.id, name = "MOVIE_RELEASE_YEAR", value = v.year))
+  def generate(user: User) =
+    Some(FeatureValue(entity = user.id, name = "USER_AGE", value = user.age))
 }
 ```
 
-Note that returning `None` in `generate` will result in no feature being generated.
-This is done here to handle incorrectly formatted release dates.
-Check [filtering](#filtering-aka-where) and [source views](#source-views) for alternatives.
+Note that here we return `Some` in `generate`. If `None` was returned,
+the feature would not be generated.
 
 ### The `FeatureSet` class
 
@@ -138,27 +150,23 @@ For details of the other classes available, refer to the **Advanced** section.
 ```scala
 package commbank.coppersmith.examples.userguide
 
-import commbank.coppersmith.util.Datestamp
 import commbank.coppersmith.api._
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
-object MovieFeatures extends BasicFeatureSet[Movie] {
-  val namespace              = "userguide.examples"
-  def entity(movie: Movie)   = movie.id
+object UserFeatures extends BasicFeatureSet[User] {
+  val namespace          = "userguide.examples"
+  def entity(user: User) = user.id
 
-  val parse = Datestamp.parseFormat("dd-MMM-yyyy")
+  val userAge = basicFeature[Integral](
+    "USER_AGE", "Age of user in years", Continuous, Some(MinMaxRange[Integral](0, 130))
+  )((user) => user.age)
 
-  val movieReleaseYear = basicFeature[Integral](
-    "MOVIE_RELEASE_YEAR", "Calendar year in which the movie was released", Continuous,
-    (movie) => parse(movie.releaseDate).right.toOption.map(_.year)
-  )
-
-  val features = List(movieReleaseYear)
+  val features = List(userAge)
 }
 ```
 
-Note that, as opposed to above, returning `None` as part of `basicFeature` will
-generate a feature with a value of `null`.
+Note that, as opposed to above, returning `None` from the function
+passed to `basicFeature` will generate a feature with a value of `null`.
 
 ### Execution: the `SimpleFeatureJob` class
 
@@ -220,13 +228,13 @@ import org.joda.time.DateTime
 
 import commbank.coppersmith.api._, scalding._, Coppersmith._, EavtText.{EavtEnc, eavtByDay}
 import commbank.coppersmith.thrift.Eavt
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
-case class MovieFeaturesConfig(conf: Config) extends FeatureJobConfig[Movie] {
+case class UserFeaturesConfig(conf: Config) extends FeatureJobConfig[User] {
   val partitions     = Partitions.unpartitioned
-  val movies         = HiveTextSource[Movie, Nothing](new Path("data/movies"), partitions)
+  val users          = HiveTextSource[User, Nothing](new Path("data/users"), partitions)
 
-  val featureSource  = From[Movie]().bind(from(movies))
+  val featureSource  = From[User]().bind(from(users))
 
   val featureContext = ExplicitGenerationTime(new DateTime(2015, 1, 1, 0, 0))
 
@@ -237,22 +245,23 @@ case class MovieFeaturesConfig(conf: Config) extends FeatureJobConfig[Movie] {
   val featureSink    = HiveTextSink[Eavt](dbPrefix, dbRoot, tableName, eavtByDay)
 }
 
-object MovieFeaturesJob extends SimpleFeatureJob {
-  def job = generate(MovieFeaturesConfig(_), MovieFeatures)
+object UserFeaturesJob extends SimpleFeatureJob {
+  def job = generate(UserFeaturesConfig(_), UserFeatures)
 }
 ```
 
-Individual data sources that are common to different feature sources can be
-pulled up to their own type for reuse. For an example of this, see the
+Individual data sources (e.g. `users`) that are common to different
+feature sources can be pulled up to their own type for reuse.
+For an example of this, see the
 `DirectorDataSource` in [Generating Features from Custom Scalding Code](#generating-features-from-custom-scalding-code).
 
 ### Partition selection
 
 The source data used so far is not partitioned. In the below example, the
-hive text source is partitioned by year, based on `Movie.ReleaseDate`.
+hive text source is partitioned by `User.Zipcode`.
 
-The job will execute on all movies released in the year of the `generation-datetime`
-specified in the config.
+The job will execute on all users with a zipcode specified by `user-zipcode`
+in the config.
 
 ```scala
 package commbank.coppersmith.examples.userguide
@@ -265,28 +274,27 @@ import org.joda.time.DateTime
 
 import commbank.coppersmith.api._, scalding._, Coppersmith._, EavtText.{EavtEnc, eavtByDay}
 import commbank.coppersmith.thrift.Eavt
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
-case class PartitionedMovieFeaturesConfig(conf: Config) extends FeatureJobConfig[Movie] {
-  val generationDateTimeStr = conf.getArgs("generation-datetime")
-  val generationDateTime    = DateTime.parse(generationDateTimeStr)
+case class PartitionedUserFeaturesConfig(conf: Config) extends FeatureJobConfig[User] {
+  val userZipcode    = conf.getArgs("user-zipcode")
 
-  val partition             = HivePartition.byYear(Fields[Movie].ReleaseDate, "dd-MMM-yyyy")
-  val partitions            = Partitions(partition, generationDateTime.getYear.toString)
-  val movies                = HiveTextSource[Movie, String](new Path("data/movies"), partitions)
+  val partition      = HivePartition.byField(Fields[User].Zipcode)
+  val partitions     = Partitions(partition, userZipcode)
+  val users          = HiveTextSource[User, String](new Path("data/users"), partitions)
 
-  val featureSource         = From[Movie]().bind(from(movies))
+  val featureSource  = From[User]().bind(from(users))
 
-  val featureContext        = ExplicitGenerationTime(generationDateTime)
+  val featureContext = ExplicitGenerationTime(new DateTime(2015, 1, 1, 0, 0))
 
-  val dbPrefix              = conf.getArgs("db-prefix")
-  val dbRoot                = new Path(conf.getArgs("db-root"))
-  val tableName             = conf.getArgs("table-name")
-  val featureSink           = HiveTextSink[Eavt](dbPrefix, dbRoot, tableName, eavtByDay)
+  val dbPrefix       = conf.getArgs("db-prefix")
+  val dbRoot         = new Path(conf.getArgs("db-root"))
+  val tableName      = conf.getArgs("table-name")
+  val featureSink    = HiveTextSink[Eavt](dbPrefix, dbRoot, tableName, eavtByDay)
 }
 
-object PartitionedMovieFeaturesJob extends SimpleFeatureJob {
-  def job = generate(PartitionedMovieFeaturesConfig(_), MovieFeatures)
+object PartitionedUserFeaturesJob extends SimpleFeatureJob {
+  def job = generate(PartitionedUserFeaturesConfig(_), UserFeatures)
 }
 ```
 
@@ -300,81 +308,17 @@ package commbank.coppersmith.examples.userguide
 import org.apache.hadoop.fs.Path
 
 import commbank.coppersmith.api._, scalding._, Coppersmith._
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
 object MultiPartitionSnippet {
-  type Partition = (String, String, String) // Year, Month, Day
+  // Spring Green and Houston
+  val partition  = HivePartition.byField(Fields[User].Zipcode)
+  val partitions = Partitions(partition, "53588", "770**", "772**")
 
-  // Last two days of July, and all of August
-  val partition  = HivePartition.byDay(Fields[Movie].ReleaseDate, "dd-MMM-yyyy")
-  val partitions =
-    Partitions(partition, ("2015", "07", "30"), ("2015", "07", "31"), ("2015", "08", "*"))
-
-  val movies     = HiveTextSource[Movie, Partition](new Path("data/movies"), partitions)
+  val users      = HiveTextSource[User, String](new Path("data/users"), partitions)
 }
 ```
 
-### Alternate sinks
-
-If an output format different to `Eavt` is required, then a `Thrift`
-struct defining the sink format is needed, as well as
-an implicit implementation of `FeatureValueEnc` for the `Thrift` struct.
-For example, this is a simple implementation where only the column names
-are different.
-
-```scala
-package commbank.coppersmith.examples.userguide
-
-import org.apache.hadoop.fs.Path
-
-import com.twitter.scalding.Config
-
-import org.joda.time.DateTime
-
-import commbank.coppersmith.api._, scalding._, Coppersmith._
-import commbank.coppersmith.examples.thrift.{FeatureEavt, Movie}
-
-case class AlternativeSinkMovieFeaturesConfig(conf: Config) extends FeatureJobConfig[Movie] {
-  implicit object FeatureEavtEnc extends FeatureValueEnc[FeatureEavt] {
-    def encode(fvt: (FeatureValue[_], FeatureTime)): FeatureEavt = fvt match {
-      case (fv, time) =>
-        val featureValue = (fv.value match {
-          case Integral(v)      => v.map(_.toString)
-          case Decimal(v)       => v.map(_.toString)
-          case FloatingPoint(v) => v.map(_.toString)
-          case Str(v)           => v
-          case Date(v)          => v.map(_.toString)
-          case Time(v)          => v.map(_.toString)
-        }).getOrElse(HiveTextSink.NullValue)
-
-        val featureTime = new DateTime(time).toString("yyyy-MM-dd")
-        FeatureEavt(fv.entity, fv.name, featureValue, featureTime)
-    }
-  }
-
-  val partitions     = Partitions.unpartitioned
-  val movies         = HiveTextSource[Movie, Nothing](new Path("data/movies"), partitions)
-
-  val featureSource  = From[Movie]().bind(from(movies))
-
-  val featureContext = ExplicitGenerationTime(new DateTime(2015, 1, 1, 0, 0))
-
-  val dbPrefix       = conf.getArgs("db-prefix")
-  val dbRoot         = new Path(conf.getArgs("db-root"))
-  val tableName      = conf.getArgs("table-name")
-
-  val sinkPartition  = DerivedSinkPartition[FeatureEavt, (String, String, String)](
-                         HivePartition.byDay(Fields[FeatureEavt].FeatureTime, "yyyy-MM-dd")
-                       )
-  val featureSink    = HiveTextSink[FeatureEavt](dbPrefix, dbRoot, tableName, sinkPartition)
-}
-
-object AlternativeSinkMovieFeaturesJob extends SimpleFeatureJob {
-  def job = generate(AlternativeSinkMovieFeaturesConfig(_), MovieFeatures)
-}
-```
-
-Note: When using `HiveTextSink`, a `SinkPartition` is required.
 
 Intermediate
 ------------
@@ -385,11 +329,11 @@ This section introduces an alternative API for feature definitions.
 ### Shaping input data: the `FeatureSource`
 
 In the example above,
-we quietly snuck in `From[Movie]()` without explanation.
+we quietly snuck in `From[User]()` without explanation.
 The type of this expression is `FeatureSource`.
 This is a trivial example,
 since it simply indicates that
-the input source is a stream of `Movie` records.
+the input source is a stream of `User` records.
 But, as will be described in the **Advanced** section,
 this also provides the basis for complex joins.
 
@@ -421,30 +365,45 @@ returning a `Feature` object.
 ```scala
 package commbank.coppersmith.examples.userguide
 
-import commbank.coppersmith.util.Datestamp
 import commbank.coppersmith.api._, Coppersmith._
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
-object FluentMovieFeatures extends FeatureSetWithTime[Movie] {
-  val namespace            = "userguide.examples"
-  def entity(movie: Movie) = movie.id
+object FluentUserFeatures extends FeatureSetWithTime[User] {
+  val namespace          = "userguide.examples"
+  def entity(user: User) = user.id
 
-  val source      = From[Movie]()  // FeatureSource (see above)
-  val select      = source.featureSetBuilder(namespace, entity)
-  val parse = Datestamp.parseFormat("dd-MMM-yyyy")
+  val source   = From[User]()  // FeatureSource (see above)
+  val select   = source.featureSetBuilder(namespace, entity)
 
-  val movieReleaseDay  = select(movie => parse(movie.releaseDate).right.toOption)
-    .asFeature(Instant, "MOVIE_RELEASE_DAY", "Day on which the movie was released")
-  val movieReleaseYear = select(movie => parse(movie.releaseDate).right.toOption.map(_.year))
-    .asFeature(Continuous, "MOVIE_RELEASE_YEAR", "Calendar year in which the movie was released")
+  val userAge  = select(user => user.age)
+    .asFeature(Continuous, "USER_AGE", Some(MinMaxRange(0, 130)),
+      "Age of user in years")
+    
+  val userAgeGroup = select(user => user.age match {
+    case x if x <= 14           => "Child"
+    case x if x > 14 && x <= 24 => "Youth"
+    case x if x > 24 && x <= 64 => "Adult"
+    case x if x > 64            => "Senior"
+  }).asFeature(Ordinal, "USER_AGE_GROUP", "Age group of user")
 
-  val features = List(movieReleaseDay, movieReleaseYear)
+  val userIsEngineer = select(user => user.occupation == "engineer")
+    .asFeature(Nominal, "USER_IS_ENGINEER", "Whether the user is an engineer")
+
+  val occupationCode = select(user => user.occupation match {
+      case "engineer"      => 15
+      case "programmer"    => 28
+      case "scientist"     => 44
+      case "administrator" => 71
+      case _               => 0
+    }).asFeature(Nominal, "OCCUPATION_CODE", "Occupation code for user")
+
+  val features = List(userAge, userAgeGroup, userIsEngineer, occupationCode)
 }
 ```
 
 The above example uses `FeatureSetWithTime`, which, by default, uses the feature
 context to give us the feature time. This implementation can be overridden like so:
-`def time(movie: Movie, ctx: FeatureContext) = DateTime.parse(movie.releaseDate).getMillis`
+`def time(user: User, ctx: FeatureContext) = DateTime.parse(user.DOB).getMillis`
 Most of the time however, the default implementation is the correct thing to do.
 
 Advanced
@@ -452,8 +411,7 @@ Advanced
 
 ### Tip: Extension methods for thrift structs
 
-If you find yourself repeating certain calculations
-(such as the date parsing in previous examples),
+If you find yourself repeating certain calculations,
 you may find that defining a "rich" version of the thrift struct
 can help to keep feature definitions clear and concise.
 
@@ -468,22 +426,18 @@ object Implicits {
     val parse = Datestamp.parseFormat("dd-MMM-yyyy")
 
     def safeReleaseDate: Option[Datestamp] =
-      parse(movie.releaseDate).right.toOption
-    def releaseYear:     Option[Int]      = safeReleaseDate.map(_.year)
-    def isComedy:        Boolean          = movie.comedy == 1
-    def isFantasy:       Boolean          = movie.fantasy == 1
-    def isAction:        Boolean          = movie.action == 1
-    def isScifi:         Boolean          = movie.scifi == 1
+      movie.releaseDate.flatMap(parse(_).right.toOption)
+
+    def releaseYear: Option[Int] = safeReleaseDate.map(_.year)
+    def isAction:    Boolean     = movie.action == 1
+    def isComedy:    Boolean     = movie.comedy == 1
+    def isFantasy:   Boolean     = movie.fantasy == 1
+    def isScifi:     Boolean     = movie.scifi == 1
 
     def ageAt(date: Datestamp): Option[Int] = safeReleaseDate.map(_.difference(date).years)
   }
 }
 ```
-
-Subsequent examples will use concise syntax
-such as `_.releaseYear` wherever possible. Note that some genre
-classifications have also been included for use in future examples.
-
 
 ### Pivoting
 
@@ -514,12 +468,13 @@ object MoviePivotFeatures extends PivotFeatureSet[Movie] {
   val title:       Feature[Movie, Str]      = pivot(Fields[Movie].Title,       "Movie title",        Nominal)
   val imdbUrl:     Feature[Movie, Str]      = pivot(Fields[Movie].ImdbUrl,     "Movie IMDb URL",     Nominal)
   val releaseDate: Feature[Movie, Str]      = pivot(Fields[Movie].ReleaseDate, "Movie release date", Nominal)
-  val action:      Feature[Movie, Integral] = pivot(Fields[Movie].Action,      "Movie is action",    Discrete)
+  val action:      Feature[Movie, Integral] = pivot(Fields[Movie].Action,      "Movie is action",    Discrete, Some(SetRange[Integral](0, 1)))
 
   def features = List(title, imdbUrl, releaseDate, action)
 }
 ```
 
+Note that the `Fields` macro cannot be used to get "rich" thrift fields.
 
 ### Aggregation (aka `GROUP BY`)
 
@@ -558,7 +513,7 @@ object RatingFeatures extends AggregationFeatureSet[Rating] {
   val select = source.featureSetBuilder(namespace, entity)
 
   val avgRating = select(avg(_.rating))
-    .asFeature(Continuous, "MOVIE_AVG_RATING",
+    .asFeature(Continuous, "MOVIE_AVG_RATING", Some(MinMaxRange(0.0, 5.0)),
                "Average movie rating")
 
   import com.twitter.algebird.{Aggregator, Moments}
@@ -686,7 +641,7 @@ object CombinedFeaturesJob extends SimpleFeatureJob {
 ### Post-aggregation filters (aka `HAVING`)
 
 Sometimes we want to filter the aggregation value (equivalent to an SQL `HAVING`
-clause. This is accomplished using the `having` method on the aggregator. The
+clause). This is accomplished using the `having` method on the aggregator. The
 following example outputs the rating count where the count is greater that 10:
 
 
@@ -704,7 +659,7 @@ object PopularRatingCountFeatures extends AggregationFeatureSet[Rating] {
   val select = source.featureSetBuilder(namespace, entity)
 
   val popularRatingCount = select(count(_.rating > 3)).having(_ > 10)
-    .asFeature(Continuous, "MOVIE_POPULAR_RATING_COUNT",
+    .asFeature(Discrete, "MOVIE_POPULAR_RATING_COUNT",
                "High rating count for movies that have more than 10 high ratings")
 
   val aggregationFeatures = List(popularRatingCount)
@@ -805,8 +760,8 @@ object MovieGenreFlags extends QueryFeatureSet[Movie, Str] {
 
   val source = From[Movie]()
 
-  val comedyMovie = queryFeature("MOVIE_IS_COMEDY", "'Y' if movie is comedy", _.isComedy)
-  val fantasyMovie = queryFeature("MOVIE_IS_ACTION", "'Y' if movie is action", _.isAction)
+  val comedyMovie = queryFeature("MOVIE_IS_COMEDY", "'Y' if movie is comedy", Some(SetRange("Y")))(_.isComedy)
+  val fantasyMovie = queryFeature("MOVIE_IS_ACTION", "'Y' if movie is action", Some(SetRange("Y")))(_.isAction)
 
   val features = List(comedyMovie, fantasyMovie)
 }
@@ -924,7 +879,7 @@ object LeftJoinFeatures extends AggregationFeatureSet[(Director, Option[Movie])]
 
   // Count the number of records where a matching movie was found
   val directorMovieCount = select(count(!_._2.isEmpty))
-    .asFeature(Continuous, "DIRECTOR_MOVIE_COUNT",
+    .asFeature(Discrete, "DIRECTOR_MOVIE_COUNT",
                "Count of movies directed")
 
   val aggregationFeatures = List(directorMovieCount)
@@ -1020,11 +975,11 @@ extraction. This is akin to Scala's `map` and `collect`
 methods on the standard collections, and the same methods
 are available on the `FeatureSetBuilder`.
 
-The following example only generates IMDb path features for
-movies where IMDb URL is defined (ie, not `None`). Notice how
-even though the `Movie.imdbUrl` type is `Option[String]`,
-there is no need to unwrap the option in the select clause
-as it has already been extracted as part of matching against
+The following example only generates release year features for
+movies where release date is defined (ie, not `None`), and in
+a valid format. Notice how even though the `Movie.safeReleaseDate`
+type is `Option[Datestamp]`, there is no need to unwrap the option in
+the select clause as it has already been extracted as part of matching against
 `Some` in the `collect`.
 
 ```scala
@@ -1033,19 +988,24 @@ package commbank.coppersmith.examples.userguide
 import commbank.coppersmith.api._, Coppersmith._
 import commbank.coppersmith.examples.thrift.Movie
 
+import Implicits.RichMovie
+
 object SourceViewFeatures extends FeatureSetWithTime[Movie] {
-  val namespace              = "userguide.examples"
-  def entity(movie: Movie)   = movie.id
+  val namespace            = "userguide.examples"
+  def entity(movie: Movie) = movie.id
 
   val source  = From[Movie]()
   val builder = source.featureSetBuilder(namespace, entity)
 
-  val movieImdbPath =
-    builder.map(m => m.imdbUrl).collect { case Some(imdbUrl) => imdbUrl }
-      .select(_.replace("http://us.imdb.com/", ""))
-      .asFeature(Nominal, "MOVIE_IMDB_PATH_AVAILABLE", "Movie IMDb Path when it is known")
+  val movieReleaseYear =
+    builder.map(m =>
+      m.safeReleaseDate
+    ).collect {
+      case Some(date) => date
+    }.select(_.year)
+     .asFeature(Continuous, "MOVIE_RELEASE_YEAR", "Movie Release year when it is known")
 
-  val features = List(movieImdbPath)
+  val features = List(movieReleaseYear)
 }
 ```
 
@@ -1182,19 +1142,19 @@ import org.joda.time.DateTime
 
 import commbank.coppersmith.api._, scalding._, Coppersmith._, EavtText.{EavtEnc, eavtByDay}
 import commbank.coppersmith.thrift.Eavt
-import commbank.coppersmith.examples.thrift.Movie
+import commbank.coppersmith.examples.thrift.User
 
-case class DistinctMovieFeaturesConfig(conf: Config) extends FeatureJobConfig[Movie] {
-  val movies         = HiveTextSource[Movie, Nothing](new Path("data/movies"), Partitions.unpartitioned)
+case class DistinctUserFeaturesConfig(conf: Config) extends FeatureJobConfig[User] {
+  val users          = HiveTextSource[User, Nothing](new Path("data/users"), Partitions.unpartitioned)
                        .distinctBy(_.id)
 
-  val featureSource  = From[Movie]().bind(from(movies))
-  val featureSink    = HiveTextSink[Eavt]("userguide", new Path("dev/ratings"), "ratings", eavtByDay)
+  val featureSource  = From[User]().bind(from(users))
+  val featureSink    = HiveTextSink[Eavt]("userguide", new Path("dev/users"), "users", eavtByDay)
   val featureContext = ExplicitGenerationTime(new DateTime(2015, 1, 1, 0, 0))
 }
 
-object DistinctMovieFeaturesJob extends SimpleFeatureJob {
-  def job = generate(DistinctMovieFeaturesConfig(_), MovieFeatures)
+object DistinctUserFeaturesJob extends SimpleFeatureJob {
+  def job = generate(DistinctUserFeaturesConfig(_), UserFeatures)
 }
 ```
 
@@ -1230,7 +1190,7 @@ object ContextFeatures extends FeatureSetWithTime[(Movie, DateTime)] {
 
   def movieAgeFeature =
     select(mdt => mdt._1.ageAt(Datestamp(mdt._2.getYear, mdt._2.getMonthOfYear, mdt._2.getDayOfMonth)))
-      .asFeature(Ordinal, "MOVIE_AGE", "Age of movie")
+      .asFeature(Continuous, "MOVIE_AGE", "Age of movie")
 
   val features = List(movieAgeFeature)
 }
@@ -1275,6 +1235,70 @@ object ContextFeaturesJob extends SimpleFeatureJob {
 
 
 ```
+
+
+### Alternate sinks
+
+If an output format different to `Eavt` is required, then a `Thrift`
+struct defining the sink format is needed, as well as
+an implicit implementation of `FeatureValueEnc` for the `Thrift` struct.
+For example, this is a simple implementation where only the column names
+are different.
+
+```scala
+package commbank.coppersmith.examples.userguide
+
+import org.apache.hadoop.fs.Path
+
+import com.twitter.scalding.Config
+
+import org.joda.time.DateTime
+
+import commbank.coppersmith.api._, scalding._, Coppersmith._
+import commbank.coppersmith.examples.thrift.{FeatureEavt, User}
+
+case class AlternativeSinkUserFeaturesConfig(conf: Config) extends FeatureJobConfig[User] {
+  implicit object FeatureEavtEnc extends FeatureValueEnc[FeatureEavt] {
+    def encode(fvt: (FeatureValue[Value], FeatureTime)): FeatureEavt = fvt match {
+      case (fv, time) =>
+        val featureValue = (fv.value match {
+          case Integral(v)      => v.map(_.toString)
+          case Decimal(v)       => v.map(_.toString)
+          case FloatingPoint(v) => v.map(_.toString)
+          case Str(v)           => v
+          case Bool(v)          => v.map(_.toString)
+          case Date(v)          => v.map(_.toString)
+          case Time(v)          => v.map(_.toString)
+        }).getOrElse(HiveTextSink.NullValue)
+
+        val featureTime = new DateTime(time).toString("yyyy-MM-dd")
+        FeatureEavt(fv.entity, fv.name, featureValue, featureTime)
+    }
+  }
+
+  val partitions     = Partitions.unpartitioned
+  val users          = HiveTextSource[User, Nothing](new Path("data/users"), partitions)
+
+  val featureSource  = From[User]().bind(from(users))
+
+  val featureContext = ExplicitGenerationTime(new DateTime(2015, 1, 1, 0, 0))
+
+  val dbPrefix       = conf.getArgs("db-prefix")
+  val dbRoot         = new Path(conf.getArgs("db-root"))
+  val tableName      = conf.getArgs("table-name")
+
+  val sinkPartition  = DerivedSinkPartition[FeatureEavt, (String, String, String)](
+                         HivePartition.byDay(Fields[FeatureEavt].FeatureTime, "yyyy-MM-dd")
+                       )
+  val featureSink    = HiveTextSink[FeatureEavt](dbPrefix, dbRoot, tableName, sinkPartition)
+}
+
+object AlternativeSinkUserFeaturesJob extends SimpleFeatureJob {
+  def job = generate(AlternativeSinkUserFeaturesConfig(_), UserFeatures)
+}
+```
+
+Note: When using `HiveTextSink`, a `SinkPartition` is required.
 
 
 ### Generating features from custom scalding code
@@ -1375,6 +1399,40 @@ object DirectorFeaturesJob extends SimpleFeatureJob {
   def job = generate(DirectorFeaturesConfig(_), DirectorFeatures)
 }
 ```
+
+### Blank Features
+
+Quite often, you may have an existing feature job implemented outside of
+Coppersmith. Examples include Hive or Scalding jobs, or even jobs implemented
+outside the Scala/Hadoop ecosystem. It is useful to describe the metadata of
+the generated features even if they are not themselves generated in coppersmith.
+
+For that, we introduce the concept of "blank" features: features which have
+coppersmith metadata but whose runtime logic is elsewhere. Below is an example
+of a Metadata set for blank features:
+
+```scala
+package commbank.coppersmith.examples.userguide
+
+import commbank.coppersmith.api._
+import commbank.coppersmith.examples.thrift._
+
+object BlankCustomerFeatureSet extends MetadataSet[Customer] {
+    def name = "BlankCustomerFeatureSet"
+
+    val customerLoyalty = Metadata[Customer, Integral](
+      "userguide.examples",
+      "cust_loyalty",
+      "A measure of the customer's loyalty, provided by external system",
+      Discrete
+    )
+
+  def metadata = List(customerLoyalty)
+}
+```
+
+With blank features, the usual metadata artifacts are generated even though
+the logic of the feature is not expressed in coppersmith.
 
 
 ### Testing
