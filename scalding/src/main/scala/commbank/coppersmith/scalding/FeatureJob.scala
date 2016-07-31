@@ -111,7 +111,7 @@ trait FeatureSetExecution {
   def features: Either[FeatureSetWithTime[Source], AggregationFeatureSet[Source]]
 
   import FeatureSetExecution.{generateFeatures, generateOneToMany, generateAggregate}
-  def generate(): Execution[Set[Path]] = CoppersmithStats.executeAndLogCounters(
+  def generate(): Execution[Set[Path]] = CoppersmithStats.logCountersAfter(
     features.fold(
       regFeatures => generateFeatures[Source](config, generateOneToMany(regFeatures)_),
       aggFeatures => generateFeatures[Source](config, generateAggregate(aggFeatures)_)
