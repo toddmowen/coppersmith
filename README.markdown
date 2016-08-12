@@ -24,6 +24,17 @@ generation can be described as simple functions and those functions should be
 able to be composed. The framework now called **coppersmith** grew out of our
 efforts to improve the lives of feature authors.
 
+Quick Start
+-----------
+Add the following dependencies to your SBT build configuration:
+```scala
+"au.com.cba.omnia" %% "coppersmith-core"     % "<coppersmith-version>"
+"au.com.cba.omnia" %% "coppersmith-scalding" % "<coppersmith-version>"
+```
+
+The latest `<coppersmith-version>` can be found
+[here](http://commbank.artifactoryonline.com/commbank/api/search/latestVersion?g=au.com.cba.omnia&a=coppersmith-core_2.11).
+
 Documentation
 -------------
 
