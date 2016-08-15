@@ -26,14 +26,17 @@ efforts to improve the lives of feature authors.
 
 Quick Start
 -----------
-Add the following dependencies to your SBT build configuration:
+Add the following dependency to your SBT build configuration
+(typically `build.sbt`)
+
 ```scala
-"au.com.cba.omnia" %% "coppersmith-core"     % "<coppersmith-version>"
-"au.com.cba.omnia" %% "coppersmith-scalding" % "<coppersmith-version>"
+libraryDependencies += "au.com.cba.omnia" %% "coppersmith-scalding" % "<coppersmith-version>"
 ```
 
-The latest `<coppersmith-version>` can be found
-[here](http://commbank.artifactoryonline.com/commbank/api/search/latestVersion?g=au.com.cba.omnia&a=coppersmith-core_2.11).
+, where
+[`<coppersmith-version>`](http://commbank.artifactoryonline.com/commbank/api/search/latestVersion?g=au.com.cba.omnia&a=coppersmith-core_2.11)
+is replaced with the version number of coppersmith you want to use
+(click the preceding link to find the latest version).
 
 Documentation
 -------------
