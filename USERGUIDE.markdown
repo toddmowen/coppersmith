@@ -488,9 +488,8 @@ Other aggregators can be defined by providing your own
 `Aggregator` instance (see the `ratingStdDev` feature in the example that
 follows).
 
-The grouping criteria (in SQL terms, the `GROUP BY` clause)
-is implicitly *the entity and the time*,
-as defined by the `entity` and `time` properties.
+The grouping criteria (in SQL terms, the `GROUP BY` clause) is
+implicitly *the entity*, as defined by the `entity` property.
 
 Note that when using `AggregationFeatureSet`,
 you should *not* override `features`;
