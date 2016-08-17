@@ -25,6 +25,16 @@ import Partitions.PathComponents
 import FeatureSink.AttemptedWriteToCommitted
 import CoppersmithStats.fromTypedPipe
 
+import com.twitter.scalding.{ExecutionCounters, StatKey}
+import com.twitter.maple.tap.MemorySourceTap
+import com.twitter.scalding.IterableSource
+import cascading.tuple.Fields
+import cascading.pipe.Each
+
+import cascading.operation.{BaseOperation, Filter}
+class MyFilter[C] extends BaseOperation[C] with Filter[C] {
+}
+
 /**
   * Parquet FeatureSink implementation - create using HiveParquetSink.apply in companion object.
   */
@@ -38,10 +48,44 @@ case class HiveParquetSink[T <: ThriftStruct : Manifest : FeatureValueEnc, P : T
         Execution.from(Left(AttemptedWriteToCommitted(partitionPath)))
       } else {
         val eavts = features.map(implicitly[FeatureValueEnc[T]].encode).withCounter("write.parquet")
-        table.writeExecution(eavts).map(_ => Right(Set(partitionPath)))
+        table.writeExecution(eavts).flatMap(restoreCounters).map(_ => Right(Set(partitionPath)))
       }
     )
   }
+
+  // Workaround required for correctly logging coppersmith stats: maestro's HiveTable.writeExecution
+  // resets counters, then returns them; reverse this by restoring the counter values.
+  import com.twitter.scalding.{ExecutionCounters, StatKey}
+  import com.twitter.scalding.typed.TypedPipeFactory
+  import com.twitter.maple.tap.MemorySourceTap
+  import com.twitter.scalding.IterableSource
+  import cascading.operation.{BaseOperation, Filter}
+  import cascading.tuple.Fields
+  import cascading.pipe.Each
+  import com.twitter.scalding.Dsl._
+  def restoreCounters(counters: ExecutionCounters): Execution[Unit] = {
+    class SetCounters[C] extends BaseOperation[C] with Filter[C] {
+    }
+
+    Execution.from(TypedPipeFactory({ (fd, mode) =>
+    val values = counters.toMap.toList.map { case (StatKey(name, group), value) => (name, group, value) }
+    val valuePipe = IterableSource(values, new Fields("name", "group", "value")).read(fd, mode)
+    val pipe = new Each(valuePipe, new SetCounters)
+    TypedPipe.fromSingleField[T](pipe)(fd, mode)
+    //TypedPipe.from(pipe)
+    })).unit
+    //Execution.from(Stat(("write.parquet", "Coppersmith")).incBy(999))
+  }
+
+  /*
+  def withCounter(name: String) = TypedPipeFactory({ (fd, mode) =>
+    // The logic to drop down to cascading duplicates the (unfortunately private) method TypedPipe.onRawSingle
+    val oldPipe = typedPipe.toPipe(new Fields(java.lang.Integer.valueOf(0)))(fd, mode, singleSetter)
+    val id = CoppersmithStats.nextId.getAndIncrement()
+    val newPipe = new Each(oldPipe, new Counter(CoppersmithStats.group, s"$id.$name"))
+  })
+   */
+
 }
 
 object HiveParquetSink {
