@@ -25,16 +25,6 @@ import Partitions.PathComponents
 import FeatureSink.AttemptedWriteToCommitted
 import CoppersmithStats.fromTypedPipe
 
-import com.twitter.scalding.{ExecutionCounters, StatKey}
-import com.twitter.maple.tap.MemorySourceTap
-import com.twitter.scalding.IterableSource
-import cascading.tuple.Fields
-import cascading.pipe.Each
-
-import cascading.operation.{BaseOperation, Filter}
-class MyFilter[C] extends BaseOperation[C] with Filter[C] {
-}
-
 /**
   * Parquet FeatureSink implementation - create using HiveParquetSink.apply in companion object.
   */
@@ -55,23 +45,32 @@ case class HiveParquetSink[T <: ThriftStruct : Manifest : FeatureValueEnc, P : T
 
   // Workaround required for correctly logging coppersmith stats: maestro's HiveTable.writeExecution
   // resets counters, then returns them; reverse this by restoring the counter values.
-  import com.twitter.scalding.{ExecutionCounters, StatKey}
+  import com.twitter.scalding.{ExecutionCounters, StatKey, Mode, TupleConverter}
   import com.twitter.scalding.typed.TypedPipeFactory
   import com.twitter.maple.tap.MemorySourceTap
-  import com.twitter.scalding.IterableSource
-  import cascading.operation.{BaseOperation, Filter}
+  import com.twitter.scalding.{IterableSource, NullSource}
+  import cascading.operation.{BaseOperation, Filter, FilterCall}
   import cascading.tuple.Fields
   import cascading.pipe.Each
+  import cascading.flow.{FlowProcess, FlowDef}
   import com.twitter.scalding.Dsl._
   def restoreCounters(counters: ExecutionCounters): Execution[Unit] = {
-    class SetCounters[C] extends BaseOperation[C] with Filter[C] {
+    println("restoreCounters called with " + counters.toMap.toString)
+
+    class SetCounters extends BaseOperation[Any] with Filter[Any] {
+      def isRemove(flowProcess: FlowProcess[_], filterCall: FilterCall[Any]) = {
+        println("isRemove")
+        false
+      }
     }
 
     Execution.from(TypedPipeFactory({ (fd, mode) =>
+    println("typed pipe factory called")
     val values = counters.toMap.toList.map { case (StatKey(name, group), value) => (name, group, value) }
     val valuePipe = IterableSource(values, new Fields("name", "group", "value")).read(fd, mode)
-    val pipe = new Each(valuePipe, new SetCounters)
-    TypedPipe.fromSingleField[T](pipe)(fd, mode)
+    //val pipe = new Each(valuePipe, new SetCounters).write(NullSource)(fd, mode)
+    TypedPipe.from[Unit](pipe, Fields.NONE)(fd, mode, implicitly[TupleConverter[Unit]])
+    //TypedPipe.fromSingleField[T](pipe)(fd, mode).write(NullSource)
     //TypedPipe.from(pipe)
     })).unit
     //Execution.from(Stat(("write.parquet", "Coppersmith")).incBy(999))
