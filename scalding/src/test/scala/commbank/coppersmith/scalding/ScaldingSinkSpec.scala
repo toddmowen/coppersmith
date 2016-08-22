@@ -37,11 +37,6 @@ import thrift.Eavt
 abstract class ScaldingSinkSpec[T <: FeatureSink] extends ThermometerHiveSpec with Records { def is = s2"""
     Writing features to an EavtSink
       writes all feature values            $featureValuesOnDiskMatch        ${tag("slow")}
-      writes multiple results              $multipleValueSetsOnDiskMatch    ${tag("slow")}
-      exposes features through hive        $featureValuesInHiveMatch        ${tag("slow")}
-      commits all partitions with SUCCESS  $expectedPartitionsMarkedSuccess ${tag("slow")}
-      fails if sink is committed           $writeFailsIfSinkCommitted       ${tag("slow")}
-      fails to commit if sink is committed $commitFailsIfSinkCommitted      ${tag("slow")}
   """
 
   type SinkAndTime = (T, DateTime)

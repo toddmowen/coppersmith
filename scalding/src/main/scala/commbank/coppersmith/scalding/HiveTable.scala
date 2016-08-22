@@ -110,11 +110,16 @@ class GenericPartitionedHiveTable[T <: ThriftStruct : Manifest, P : Manifest : T
       } yield counter)
 
     // Runs the scalding job and gets the counters
-    def write(path: Path) =
-      pipe
+    def write(path: Path) = {
+      println("you called what you wanted to call")
+      for {
+      b <- pipe
         .writeExecution(PartitionParquetScroogeSink[P, T](hivePartitionPattern, path.toString))
         .getCounters
         .map(_._2)
+        _ = println(b._2.toMap)
+      } yield b
+    }
 
     if (append) {
       withTable(write(_).withSubConfig(modifyConfig)) 

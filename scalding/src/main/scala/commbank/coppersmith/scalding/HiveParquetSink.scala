@@ -18,7 +18,7 @@ import com.twitter.scalding.{Execution, TupleSetter, TypedPipe}
 
 import org.apache.hadoop.fs.Path
 
-import au.com.cba.omnia.maestro.api._
+import au.com.cba.omnia.maestro.api.{HiveTable => _, _}
 
 import commbank.coppersmith._, Feature._
 import Partitions.PathComponents

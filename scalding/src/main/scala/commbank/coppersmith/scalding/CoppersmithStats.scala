@@ -60,11 +60,13 @@ object CoppersmithStats {
     }
   }
 
-  def fromCounters(counters: ExecutionCounters): List[(String, Long)] =
+  def fromCounters(counters: ExecutionCounters): List[(String, Long)] = {
+    println(counters.toMap)
     counters.keys.filter(_.group == group).map { key =>
       val Array(id, name) = key.counter.split(raw"\.", 2)
       (id.toLong, name, key)
     }.toList.sortBy(_._1).map { case (id, name, key) => (name, counters(key)) }
+  }
 }
 
 class CoppersmithStats[T](typedPipe: TypedPipe[T]) extends {
