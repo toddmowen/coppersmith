@@ -117,7 +117,7 @@ class GenericPartitionedHiveTable[T <: ThriftStruct : Manifest, P : Manifest : T
         .writeExecution(PartitionParquetScroogeSink[P, T](hivePartitionPattern, path.toString))
         .getCounters
         .map(_._2)
-        _ = println(b._2.toMap)
+        _ = println(b.toMap)
       } yield b
     }
 
@@ -159,8 +159,11 @@ case class PartitionedHiveTable[T <: ThriftStruct : Manifest, P : Manifest : Tup
   override val externalPath: Option[String] = None, override val partitionBatchSize: Int = 100
 ) extends GenericPartitionedHiveTable[T, P](database, table, partition.fieldNames, externalPath, partitionBatchSize)
   with HiveTable[T, (P, T)] {
-  override def writeExecution(pipe: TypedPipe[T], append: Boolean = true): Execution[ExecutionCounters] =
-    writeToSink( pipe.map(r => (partition.extract(r) -> r)), append)
+  override def writeExecution(pipe: TypedPipe[T], append: Boolean = true): Execution[ExecutionCounters] = for {
+    x <- writeToSink( pipe.map(r => (partition.extract(r) -> r)), append).getCounters
+    _ = println("x._1: " + x._1.toMap.toString)
+    _ = println("x._2: " + x._2.toMap.toString)
+  } yield x._1
 }
 
 /** Information need to address/describe a specific unpartitioned hive table.*/

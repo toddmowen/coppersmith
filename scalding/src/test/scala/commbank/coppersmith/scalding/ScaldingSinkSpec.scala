@@ -70,6 +70,7 @@ abstract class ScaldingSinkSpec[T <: FeatureSink] extends ThermometerHiveSpec wi
 
       withEnvironment(path(getClass.getResource("/").toString)) {
         val (_, counters) = executesSuccessfully(sink.write(valuePipe(vs, dateTime)).getCounters)
+        println(counters.toMap)
         facts(
           path(s"${tablePath(sink)}/*/*/*/*") ==> records(eavtReader, expected)
         )
