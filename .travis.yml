@@ -13,7 +13,6 @@ install:
 script:
 - sbt -Dsbt.global.base=$TRAVIS_BUILD_DIR/ci '; test; package'
 - ci/sbt-ci-deploy.sh maven http://commbank.artifactoryonline.com/commbank ext-releases-local
-- blahblah
 - ci/ci-nonrelease.sh sbt -Dsbt.global.base=$TRAVIS_BUILD_DIR/ci core/publishLocal scalding/publishLocal tools/publishLocal
 - sbt -Dsbt.global.base=$TRAVIS_BUILD_DIR/ci 'plugin/scripted'
 - ci/sbt-ci-deploy.sh ivy http://commbank.artifactoryonline.com/commbank ext-releases-local-ivy plugin
